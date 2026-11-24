@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>生產線 Cycle Time 與閒置時間互動計算器</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --primary: #1d4ed8;
+      --primary-hover: #1e40af;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent-bg: #eff6ff;
+      --success-bg: #ecfdf5;
+      --success-text: #065f46;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 24px 16px;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+
+    header {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    header h1 {
+      margin: 0 0 6px;
+      font-size: 1.45rem;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 1.15rem;
+      border-left: 4px solid var(--primary);
+      padding-left: 10px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    button {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 9px 16px;
+      font-size: 0.92rem;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    button:hover {
+      background: var(--primary-hover);
+    }
+
+    button.secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    button.secondary:hover {
+      background: #f9fafb;
+    }
+
+    .hint {
+      font-size: 0.88rem;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .kpi-box {
+      background: var(--accent-bg);
+      border: 1px solid #bfdbfe;
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+
+    .kpi-box.highlight {
+      background: var(--success-bg);
+      border-color: #a7f3d0;
+    }
+
+    .kpi-label {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .kpi-value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    .kpi-box.highlight .kpi-value {
+      color: var(--success-text);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 9px 12px;
+      text-align: left;
+    }
+
+    th {
+      background: #f8fafc;
+      font-weight: 600;
+    }
+
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .badge-bottleneck {
+      display: inline-block;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-left: 6px;
+    }
+
+    .chart-container {
+      position: relative;
+      height: 300px;
+      width: 100%;
+    }
+
+    .error-msg {
+      color: #b91c1c;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-top: 10px;
+      display: none;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>生產線 Cycle Time 與閒置時間互動計算器</h1>
+      <p>上傳 CSV 檔案後，自動呈現步驟 3 資料、計算各工作站與整條生產線 Cycle Time、工作站閒置時間與長條圖，方便自行驗算。</p>
+    </header>
+
+    <section class="card">
+      <h2>1. 上傳 CSV 檔案</h2>
+      <div class="controls">
+        <input type="file" id="csvFileInput" accept=".csv,text/csv" />
+        <button type="button" class="secondary" id="loadSampleBtn">載入範例 CSV（3 個工作站）</button>
+        <button type="button" class="secondary" id="downloadSampleBtn">下載範例 CSV</button>
+      </div>
+      <div class="hint">
+        支援兩種常見 CSV 格式：
+        <br />• <strong>長表格式</strong>：例如欄位包含 <code>item / product / job</code>、<code>station / workstation / 工作站</code>、<code>time / duration / cycle_time / 工時</code>（每列一筆加工紀錄）。
+        <br />• <strong>寬表格式</strong>：例如第一欄為產品/工件編號，其餘欄位為各工作站（如 <code>Station1</code>、<code>Station2</code>、<code>Station3</code> 或 <code>工作站1</code>）的加工時間。
+      </div>
+      <div id="errorBox" class="error-msg"></div>
+    </section>
+
+    <section class="card">
+      <h2>2. 整條生產線計算結果（請自行驗算）</h2>
+      <div class="kpi-grid">
+        <div class="kpi-box">
+          <div class="kpi-label">工作站數量</div>
+          <div class="kpi-value" id="kpiStationCount">-</div>
+        </div>
+        <div class="kpi-box">
+          <div class="kpi-label">總加工件數 / 紀錄數</div>
+          <div class="kpi-value" id="kpiRecordCount">-</div>
+        </div>
+        <div class="kpi-box highlight">
+          <div class="kpi-label">整條生產線 Cycle Time（瓶頸站平均工時）</div>
+          <div class="kpi-value" id="kpiLineCT">-</div>
+        </div>
+        <div class="kpi-box">
+          <div class="kpi-label">各站平均 Cycle Time 總和</div>
+          <div class="kpi-value" id="kpiTotalCT">-</div>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table id="stationSummaryTable">
+          <thead>
+            <tr>
+              <th>工作站</th>
+              <th class="num">樣本數 (n)</th>
+              <th class="num">加工時間總和</th>
+              <th class="num">工作站 Cycle Time (平均)</th>
+              <th class="num">閒置時間 (Line CT - 站 CT)</th>
+              <th class="num">工時利用率 (%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="6" style="text-align:center; color:#6b7280;">尚未載入資料</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3. 步驟 3 上傳之原始 CSV 資料明細</h2>
+      <div class="hint" id="rawInfo">尚未載入任何 CSV 資料。</div>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table id="rawDataTable">
+          <thead><tr><th>提示</th></tr></thead>
+          <tbody><tr><td>請上傳 CSV 或點擊「載入範例 CSV」。</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4. 各工作站 Cycle Time 與閒置時間長條圖</h2>
+      <div class="chart-container">
+        <canvas id="ctBarChart"></canvas>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const SAMPLE_CSV = `item,station,cycle_time
+P01,Station1,12
+P01,Station2,15
+P01,Station3,9
+P02,Station1,10
+P02,Station2,17
+P02,Station3,11
+P03,Station1,14
+P03,Station2,13
+P03,Station3,10
+P04,Station1,12
+P04,Station2,15
+P04,Station3,10`;
+
+    let chartInstance = null;
+
+    const csvFileInput = document.getElementById("csvFileInput");
+    const loadSampleBtn = document.getElementById("loadSampleBtn");
+    const downloadSampleBtn = document.getElementById("downloadSampleBtn");
+    const errorBox = document.getElementById("errorBox");
+
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.style.display = msg ? "block" : "none";
+    }
+
+    // 簡易且穩健的 CSV 解析器（支援引號與逗號）
+    function parseCSV(text) {
+      const rows = [];
+      let currentRow = [];
+      let currentVal = "";
+      let inQuotes = false;
+
+      const cleanText = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+      for (let i = 0; i < cleanText.length; i++) {
+        const ch = cleanText[i];
+        const nextCh = cleanText[i + 1];
+
+        if (inQuotes) {
+          if (ch === '"' && nextCh === '"') {
+            currentVal += '"';
+            i++;
+          } else if (ch === '"') {
+            inQuotes = false;
+          } else {
+            currentVal += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ",") {
+            currentRow.push(currentVal.trim());
+            currentVal = "";
+          } else if (ch === "\n") {
+            currentRow.push(currentVal.trim());
+            if (currentRow.some((cell) => cell !== "")) {
+              rows.push(currentRow);
+            }
+            currentRow = [];
+            currentVal = "";
+          } else {
+            currentVal += ch;
+          }
+        }
+      }
+
+      if (currentVal !== "" || currentRow.length > 0) {
+        currentRow.push(currentVal.trim());
+        if (currentRow.some((cell) => cell !== "")) {
+          rows.push(currentRow);
+        }
+      }
+
+      if (rows.length < 2) {
+        throw new Error("CSV 至少需要包含標題列與一筆資料列。");
+      }
+
+      const headers = rows[0];
+      const records = rows.slice(1).map((r) => {
+        const obj = {};
+        headers.forEach((h, idx) => {
+          obj[h] = r[idx] !== undefined ? r[idx] : "";
+        });
+        return obj;
+      });
+
+      return { headers, records };
+    }
+
+    // 計算各工作站 Cycle Time、整條產線 Cycle Time 與閒置時間
+    function analyzeProductionData(headers, records) {
+      const lowerHeaders = headers.map((h) => h.toLowerCase().trim());
+
+      const stationColIdx = lowerHeaders.findIndex((h) =>
+        ["station", "workstation", "ws", "工作站", "站別", "machine"].includes(h)
+      );
+      const timeColIdx = lowerHeaders.findIndex((h) =>
+        ["cycle_time", "cycletime", "ct", "time", "duration", "processing_time", "工時", "時間", "加工時間"].includes(h)
+      );
+
+      const stationMap = new Map();
+
+      if (stationColIdx !== -1 && timeColIdx !== -1) {
+        // 長表格式：每列包含「工作站」與「時間」
+        const stationHeader = headers[stationColIdx];
+        const timeHeader = headers[timeColIdx];
+
+        records.forEach((row, idx) => {
+          const stName = String(row[stationHeader] || "").trim();
+          const val = Number(row[timeHeader]);
+          if (!stName || Number.isNaN(val)) {
+            throw new Error(`第 ${idx + 2} 列的「${stationHeader}」或「${timeHeader}」數值無效。`);
+          }
+          if (!stationMap.has(stName)) {
+            stationMap.set(stName, []);
+          }
+          stationMap.get(stName).push(val);
+        });
+      } else {
+        // 寬表格式：除第一欄（通常為工件/產品編號）外，數值欄位視為各工作站
+        const candidateCols = headers.slice(1).filter((h) => {
+          const validNums = records
+            .map((r) => Number(r[h]))
+            .filter((n) => r[h] !== "" && !Number.isNaN(n));
+          return validNums.length > 0;
+        });
+
+        if (candidateCols.length === 0) {
+          throw new Error("無法自動辨識工作站與加工時間欄位，請確認 CSV 欄位名稱或數值格式。");
+        }
+
+        candidateCols.forEach((col) => {
+          const nums = [];
+          records.forEach((r, idx) => {
+            if (r[col] === "") return;
+            const val = Number(r[col]);
+            if (Number.isNaN(val)) {
+              throw new Error(`第 ${idx + 2} 列「${col}」的數值「${r[col]}」不是有效數字。`);
+            }
+            nums.push(val);
+          });
+          stationMap.set(col, nums);
+        });
+      }
+
+      const stationStats = [];
+      let lineCycleTime = 0;
+      let sumOfStationCT = 0;
+
+      for (const [station, times] of stationMap.entries()) {
+        const count = times.length;
+        const totalTime = times.reduce((acc, v) => acc + v, 0);
+        const stationCT = count > 0 ? totalTime / count : 0;
+        stationStats.push({
+          station,
+          count,
+          totalTime,
+          stationCT,
+          idleTime: 0,
+          utilization: 0,
+          isBottleneck: false
+        });
+        if (stationCT > lineCycleTime) {
+          lineCycleTime = stationCT;
+        }
+        sumOfStationCT += stationCT;
+      }
+
+      stationStats.forEach((st) => {
+        // 以整條生產線 Cycle Time（瓶頸工作站平均工時）為基準計算閒置時間
+        st.idleTime = Math.max(0, lineCycleTime - st.stationCT);
+        st.utilization = lineCycleTime > 0 ? (st.stationCT / lineCycleTime) * 100 : 0;
+        st.isBottleneck = Math.abs(st.stationCT - lineCycleTime) < 1e-9 && lineCycleTime > 0;
+      });
+
+      return {
+        stationCount: stationStats.length,
+        recordCount: records.length,
+        lineCycleTime,
+        sumOfStationCT,
+        stationStats
+      };
+    }
+
+    function formatNum(n) {
+      return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    }
+
+    function renderResults(headers, records, analysis) {
+      document.getElementById("kpiStationCount").textContent = `${analysis.stationCount} 站`;
+      document.getElementById("kpiRecordCount").textContent = `${analysis.recordCount} 筆`;
+      document.getElementById("kpiLineCT").textContent = formatNum(analysis.lineCycleTime);
+      document.getElementById("kpiTotalCT").textContent = formatNum(analysis.sumOfStationCT);
+
+      // 渲染各工作站統計表
+      const summaryBody = document.querySelector("#stationSummaryTable tbody");
+      summaryBody.innerHTML = "";
+
+      analysis.stationStats.forEach((st) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${escapeHtml(st.station)}${st.isBottleneck ? '<span class="badge-bottleneck">瓶頸站</span>' : ""}</td>
+          <td class="num">${st.count}</td>
+          <td class="num">${formatNum(st.totalTime)}</td>
+          <td class="num"><strong>${formatNum(st.stationCT)}</strong></td>
+          <td class="num">${formatNum(st.idleTime)}</td>
+          <td class="num">${st.utilization.toFixed(1)}%</td>
+        `;
+        summaryBody.appendChild(tr);
+      });
+
+      // 渲染步驟 3 原始 CSV 資料
+      document.getElementById("rawInfo").textContent =
+        `共 ${records.length} 筆資料列、${headers.length} 個欄位（欄位：${headers.join("、")}）`;
+
+      const rawHead = document.querySelector("#rawDataTable thead");
+      const rawBody = document.querySelector("#rawDataTable tbody");
+      rawHead.innerHTML = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
+      rawBody.innerHTML = records
+        .map(
+          (r) =>
+            `<tr>${headers.map((h) => `<td>${escapeHtml(r[h])}</td>`).join("")}</tr>`
+        )
+        .join("");
+
+      // 繪製長條圖
+      renderBarChart(analysis.stationStats);
+    }
+
+    function renderBarChart(stationStats) {
+      const ctx = document.getElementById("ctBarChart").getContext("2d");
+      if (chartInstance) {
+        chartInstance.destroy();
+      }
+
+      const labels = stationStats.map((s) => s.station);
+      const ctData = stationStats.map((s) => Number(s.stationCT.toFixed(2)));
+      const idleData = stationStats.map((s) => Number(s.idleTime.toFixed(2)));
+
+      chartInstance = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {
+              label: "工作站 Cycle Time（平均工時）",
+              data: ctData,
+              backgroundColor: "rgba(29, 78, 216, 0.8)"
+            },
+            {
+              label: "工作站閒置時間（Idle Time）",
+              data: idleData,
+              backgroundColor: "rgba(16, 185, 129, 0.75)"
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: "時間（單位同 CSV）"
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function processCSVText(text) {
+      try {
+        showError("");
+        const { headers, records } = parseCSV(text);
+        const analysis = analyzeProductionData(headers, records);
+        renderResults(headers, records, analysis);
+      } catch (err) {
+        showError(err.message || "解析 CSV 時發生錯誤。");
+      }
+    }
+
+    csvFileInput.addEventListener("change", (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => processCSVText(String(evt.target.result || ""));
+      reader.onerror = () => showError("讀取檔案失敗，請重新選擇 CSV。");
+      reader.readAsText(file, "UTF-8");
+    });
+
+    loadSampleBtn.addEventListener("click", () => {
+      processCSVText(SAMPLE_CSV);
+    });
+
+    downloadSampleBtn.addEventListener("click", () => {
+      const blob = new Blob(["\uFEFF" + SAMPLE_CSV], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "sample_3_stations.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // 預設先載入範例資料方便立即測試與驗算
+    processCSVText(SAMPLE_CSV);
+  </script>
+</body>
+</html>
